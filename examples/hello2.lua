@@ -5,7 +5,7 @@ local Timer = require "lua.timer"
 
 
 local count = 0
-local server = Socket.New(CSocket.AF_INET,CSocket.SOCK_STREAM,CSocket.IPPROTO_TCP)
+local server = Socket.Stream.New(CSocket.AF_INET)
 if not server:Listen("127.0.0.1",8001) then
 		print("hello2 listen on 127.0.0.1 8001")
 		Sche.Spawn(function ()
@@ -23,7 +23,7 @@ if not server:Listen("127.0.0.1",8001) then
 			print("new client")
 			Sche.Spawn(function ()
 				while true do
-					local packet,err = client:Recv()
+					local packet,err = client:Recv(1000)
 					if err then
 						print("client disconnected err:" .. err)			
 						client:Close()

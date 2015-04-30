@@ -1,14 +1,15 @@
 #include "luapacket.h"
-
+#include "lua/lua_util_packet.h"
 
 static int lua_new_packet(lua_State *L,int packettype){
 	int argtype = lua_type(L,1); 
 	if(packettype == WPACKET){
-		if(argtype == LUA_TNUMBER){
+		if(argtype == LUA_TNUMBER || argtype == LUA_TNIL || argtype == LUA_TNONE){
 			//参数为数字,构造一个初始大小为len的wpacket
-			size_t len = size_of_pow2(lua_tointeger(L,1));
+			size_t len = 0;
+			if(argtype == LUA_TNUMBER) len = size_of_pow2(lua_tointeger(L,1));
 			if(len < 64) len = 64;
-			lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(lua_packet_t));
+			lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(*p));
 			luaL_getmetatable(L, LUAPACKET_METATABLE);
 			lua_setmetatable(L, -2);
 			p->_packet = (packet_t)wpk_create(len);
@@ -16,7 +17,7 @@ static int lua_new_packet(lua_State *L,int packettype){
 		}else if(argtype == LUA_TSTRING){
 			size_t len;
 			char *data = (char*)lua_tolstring(L,1,&len);
-			lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(lua_packet_t));
+			lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(*p));
 			luaL_getmetatable(L, LUAPACKET_METATABLE);
 			lua_setmetatable(L, -2);
 			p->_packet = (packet_t)wpk_create_by_bin((int8_t*)data,len);
@@ -27,19 +28,33 @@ static int lua_new_packet(lua_State *L,int packettype){
 				return luaL_error(L,"invaild opration for arg1");
 			if(other->_packet->type == RAWPACKET)
 				return luaL_error(L,"invaild opration for arg1");
-			lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(lua_packet_t));
+			lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(*p));
 			luaL_getmetatable(L, LUAPACKET_METATABLE);
 			lua_setmetatable(L, -2);
-			p->_packet = (packet_t)wpk_copy_create(other->_packet);
+			p->_packet = make_writepacket(other->_packet);//(packet_t)wpk_copy_create(other->_packet);
 			return 1;												
-		}else
+		}else if(argtype == LUA_TTABLE){
+			wpacket_t wpk = wpk_create(512);
+			if(0 != lua_pack_table(wpk,L,-1)){
+				destroy_packet((packet_t)wpk);
+				return luaL_error(L,"table should not hava metatable");	
+				//lua_pushnil(L);
+			}else{
+				lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(*p));
+				luaL_getmetatable(L, LUAPACKET_METATABLE);
+				lua_setmetatable(L, -2);
+				p->_packet = (packet_t)wpk;		
+			}
+			return 1;
+		}
+		else	
 			return luaL_error(L,"invaild opration for arg1");		
 	}else if(packettype == RAWPACKET){
 		if(argtype == LUA_TSTRING){
 			//参数为string,构造一个函数数据data的rawpacket
 			size_t len;
 			char *data = (char*)lua_tolstring(L,1,&len);
-			lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(lua_packet_t));
+			lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(*p));
 			luaL_getmetatable(L, LUAPACKET_METATABLE);
 			lua_setmetatable(L, -2);				
 			p->_packet = (packet_t)rawpacket_create2(data,len);
@@ -50,10 +65,10 @@ static int lua_new_packet(lua_State *L,int packettype){
 				return luaL_error(L,"invaild opration for arg1");
 			if(other->_packet->type != RAWPACKET)
 				return luaL_error(L,"invaild opration for arg1");
-			lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(lua_packet_t));
+			lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(*p));
 			luaL_getmetatable(L, LUAPACKET_METATABLE);
 			lua_setmetatable(L, -2);
-			p->_packet = (packet_t)rawpacket_copy_create((rawpacket_t)other->_packet);
+			p->_packet = clone_packet(other->_packet);
 			return 1;							
 		}else
 			return luaL_error(L,"invaild opration for arg1");
@@ -64,10 +79,10 @@ static int lua_new_packet(lua_State *L,int packettype){
 				return luaL_error(L,"invaild opration for arg1");
 			if(other->_packet->type == RAWPACKET)
 				return luaL_error(L,"invaild opration for arg1");
-			lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(lua_packet_t));
+			lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(*p));
 			luaL_getmetatable(L, LUAPACKET_METATABLE);
 			lua_setmetatable(L, -2);
-			p->_packet = (packet_t)rpk_copy_create(other->_packet);
+			p->_packet = make_readpacket(other->_packet);
 			return 1;					
 		}else
 			return luaL_error(L,"invaild opration for arg1");	
@@ -76,7 +91,7 @@ static int lua_new_packet(lua_State *L,int packettype){
 }
 
 void push_luapacket(lua_State *L,packet_t pk){
-	lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(lua_packet_t));
+	lua_packet_t p = (lua_packet_t)lua_newuserdata(L, sizeof(*p));
 	luaL_getmetatable(L, LUAPACKET_METATABLE);
 	lua_setmetatable(L, -2);
 	p->_packet = pk;
@@ -87,6 +102,7 @@ static int destroy_luapacket(lua_State *L) {
 	lua_packet_t p = lua_getluapacket(L,1);
 	if(p->_packet){ 
 		destroy_packet(p->_packet);
+		p->_packet = NULL;
 	}
     return 0;
 }
@@ -153,7 +169,7 @@ static int _write_string(lua_State *L){
 	return 0;	
 }
 
-static int _write_wpk(lua_State *L){
+/*static int _write_wpk(lua_State *L){
 	lua_packet_t p = lua_getluapacket(L,1);
 	if(!p->_packet || p->_packet->type != WPACKET)
 		return luaL_error(L,"invaild opration");
@@ -162,9 +178,22 @@ static int _write_wpk(lua_State *L){
 		return luaL_error(L,"invaild arg2");
 	wpk_write_wpk((wpacket_t)p->_packet,(wpacket_t)v->_packet);	
 	return 0;			
+}*/
+
+
+int _write_table(lua_State *L){
+	lua_packet_t p = lua_getluapacket(L,1);
+	if(!p->_packet || p->_packet->type != WPACKET)
+		return luaL_error(L,"invaild opration");	
+	if(LUA_TTABLE != lua_type(L, 2))
+		return luaL_error(L,"argument should be lua table");
+	if(0 != lua_pack_table((wpacket_t)p->_packet,L,-1))
+		return luaL_error(L,"table should not hava metatable");	
+	return 0;	
 }
 
-static int _rewrite_uint8(lua_State *L){
+
+/*static int _rewrite_uint8(lua_State *L){
 	lua_packet_t p = lua_getluapacket(L,1);
 	if(p->_packet->type != WPACKET)
 		return luaL_error(L,"invaild opration");
@@ -238,7 +267,7 @@ static int _rewrite_double(lua_State *L){
 	lua_pop(L,1);
 	wpk_rewrite_double(&wpos,(double)lua_tonumber(L,3));		
 	return 0;	
-}
+}*/
 
 static int _read_uint8(lua_State *L){
 	lua_packet_t p = lua_getluapacket(L,1);
@@ -267,6 +296,33 @@ static int _read_uint32(lua_State *L){
 	return 1;	
 }
 
+static int _read_int8(lua_State *L){
+	lua_packet_t p = lua_getluapacket(L,1);
+	if(p->_packet->type != RPACKET)
+		return luaL_error(L,"invaild opration");
+	rpacket_t rpk = (rpacket_t)p->_packet;
+	lua_pushinteger(L,(int8_t)rpk_read_uint8(rpk));
+	return 1;	
+}
+
+static int _read_int16(lua_State *L){
+	lua_packet_t p = lua_getluapacket(L,1);
+	if(p->_packet->type != RPACKET)
+		return luaL_error(L,"invaild opration");
+	rpacket_t rpk = (rpacket_t)p->_packet;
+	lua_pushinteger(L,(int16_t)rpk_read_uint16(rpk));
+	return 1;	
+}
+
+static int _read_int32(lua_State *L){
+	lua_packet_t p = lua_getluapacket(L,1);
+	if(p->_packet->type != RPACKET)
+		return luaL_error(L,"invaild opration");
+	rpacket_t rpk = (rpacket_t)p->_packet;
+	lua_pushinteger(L,(int32_t)rpk_read_uint32(rpk));
+	return 1;	
+}
+
 
 static int _read_double(lua_State *L){
 	lua_packet_t p = lua_getluapacket(L,1);
@@ -284,7 +340,52 @@ static int _read_string(lua_State *L){
 	rpacket_t rpk = (rpacket_t)p->_packet;
 	uint32_t len;
 	const char *data = rpk_read_binary(rpk,&len);
-	lua_pushlstring(L,data,(size_t)len);
+	if(data)
+		lua_pushlstring(L,data,(size_t)len);
+	else
+		lua_pushnil(L);
+	return 1;
+}
+
+
+static int to_lua_table(lua_State *L){
+	lua_packet_t p = lua_getluapacket(L,1);
+	if(!p->_packet || p->_packet->type != RPACKET)
+		return luaL_error(L,"invaild opration");
+	rpacket_t rpk = 	(rpacket_t)p->_packet;
+
+	//backup
+	uint32_t rpos = rpk->rpos;
+	uint32_t data_remain = packet_dataremain(rpk);
+	buffer_t readbuf = rpk->readbuf;
+
+	do{
+		int top = lua_gettop(L);
+		int ret = lua_unpack_table(rpk,L);
+		if(0 != ret){
+			lua_settop(L,top);
+			lua_pushnil(L);
+		}		
+	}while(0);
+
+	//recover
+	rpk->rpos = rpos;
+	packet_dataremain(rpk) = data_remain; 
+	rpk->readbuf = readbuf;
+	return 1;
+}
+
+static int _read_table(lua_State *L){
+	lua_packet_t p = lua_getluapacket(L,1);
+	if(!p->_packet || p->_packet->type != RPACKET)
+		return luaL_error(L,"invaild opration");
+	rpacket_t rpk = 	(rpacket_t)p->_packet;	
+	int old_top = lua_gettop(L);
+	int ret = lua_unpack_table(rpk,L);
+	if(0 != ret){
+		lua_settop(L,old_top);
+		lua_pushnil(L);
+	}
 	return 1;
 }
 
@@ -300,7 +401,7 @@ static int _read_rawbin(lua_State *L){
 	return 1;						
 }
 
-static int _reverse_read_uint16(lua_State *L){
+/*static int _reverse_read_uint16(lua_State *L){
 	lua_packet_t p = lua_getluapacket(L,1);
 	if(p->_packet->type != RPACKET)
 		return luaL_error(L,"invaild opration");
@@ -316,7 +417,7 @@ static int _reverse_read_uint32(lua_State *L){
 	rpacket_t rpk = (rpacket_t)p->_packet;
 	lua_pushinteger(L,reverse_read_uint32(rpk));
 	return 1;		
-}
+}*/
 
 /*static int _reset_rpos(lua_State *L){
 	lua_packet_t p = lua_getluapacket(L,1);
@@ -359,7 +460,7 @@ static int _peek_uint32(lua_State *L){
 }
 
 
-static int _peek_double(lua_State *L){
+/*static int _peek_double(lua_State *L){
 	lua_packet_t p = lua_getluapacket(L,1);
 	if(p->_packet->type != RPACKET)
 		lua_pushnil(L);	
@@ -368,7 +469,7 @@ static int _peek_double(lua_State *L){
 		lua_pushnumber(L,rpk_peek_double(rpk));
 	}
 	return 1;	
-}
+}*/
 
 
 static int lua_new_wpacket(lua_State *L){
@@ -383,7 +484,7 @@ static int lua_new_rawpacket(lua_State *L){
 	return lua_new_packet(L,RAWPACKET);
 }
 
-static int _get_write_pos(lua_State *L){
+/*static int _get_write_pos(lua_State *L){
 	lua_packet_t p = lua_getluapacket(L,1);
 	if(!p->_packet || p->_packet->type != WPACKET)
 		return luaL_error(L,"invaild opration");		
@@ -394,8 +495,7 @@ static int _get_write_pos(lua_State *L){
 	lua_pushinteger(L,wpos.wpos);
 	lua_rawseti(L,-2,2);
 	return 1;		
-}
-
+}*/
 
 void reg_luapacket(lua_State *L){
     luaL_Reg packet_mt[] = {
@@ -407,34 +507,25 @@ void reg_luapacket(lua_State *L){
         {"Read_uint8", _read_uint8},
         {"Read_uint16", _read_uint16},
         {"Read_uint32", _read_uint32},
+        {"Read_int8", _read_int8},
+        {"Read_int16", _read_int16},
+        {"Read_int32", _read_int32},        
         {"Read_double", _read_double},        
         {"Read_string", _read_string},
+        {"Read_table", _read_table},
         {"Read_rawbin", _read_rawbin},
-        {"Reverse_read_uint16", _reverse_read_uint16},
-        {"Reverse_read_uint32", _reverse_read_uint32},
-        
-        
-        
         {"Peek_uint8", _peek_uint8},
         {"Peek_uint16", _peek_uint16},
         {"Peek_uint32", _peek_uint32},
-        {"Peek_double", _peek_double},
-        //{"Reset_rpos",  _reset_rpos},                     
-        
+                 
         {"Write_uint8", _write_uint8},
         {"Write_uint16", _write_uint16},
         {"Write_uint32", _write_uint32},
         {"Write_double",_write_double},        
-        {"Write_string",_write_string},
-        {"Write_wpk",   _write_wpk},
+        {"Write_string", _write_string},
+        {"Write_table",  _write_table},
 
-        {"Rewrite_uint8",  _rewrite_uint8},
-        {"Rewrite_uint16", _rewrite_uint16},
-        {"Rewrite_uint32", _rewrite_uint32},
-        {"Rewrite_double", _rewrite_double},        
-     
-		{"Get_write_pos", _get_write_pos},
-		
+        {"ToTable",to_lua_table},
         {NULL, NULL}
     };
 
@@ -448,9 +539,9 @@ void reg_luapacket(lua_State *L){
     luaL_Reg l[] = {
         {"NewWPacket",lua_new_wpacket},
         {"NewRPacket",lua_new_rpacket},
-        {"NewRawPacket",lua_new_rawpacket},                    
+        {"NewRawPacket",lua_new_rawpacket},
         {NULL, NULL}
     };
     luaL_newlib(L, l);
-	lua_setglobal(L,"CPacket");    	
+    lua_setglobal(L,"CPacket");    	
 }

@@ -1,4 +1,3 @@
-local MinHeap = require "lua.minheap"
 local Sche = require "lua.sche"
 local timer = {
 	minheap,
@@ -8,7 +7,7 @@ function timer:new(runImmediate,tickinterval)
   local o = {}   
   setmetatable(o, self)
   self.__index = self
-  o.minheap = MinHeap.New()
+  o.minheap = CMinHeap.New()
   o.tickinterval = tickinterval or 1
   if runImmediate then
   	Sche.SpawnAndRun(function () o:Run() end)
@@ -20,11 +19,9 @@ function timer:Register(callback,ms,...)
 	local t = {}
 	t.callback = callback
 	t.ms = ms
-	t.index = 0
-	t.timeout = C.GetSysTick() + ms
 	t.arg = table.pack(...)
 	t.timer = self
-	self.minheap:Insert(t)
+	self.minheap:Insert(t,C.GetSysTick() + ms)
 	return self,t
 end
 
@@ -48,22 +45,26 @@ function timer:Run()
 	local timer = self.minheap
 	self.stop = false
 	while true do
-		local now = C.GetSysTick()
-		while not self.stop  and timer:Min() ~= 0 and timer:Min() <= now do
-			t = timer:PopMin()
-			if not t.invaild then
-				local status,ret = pcall(t.callback,table.unpack(t.arg))
-				if not status then
-					local err = ret
-					CLog.SysLog(CLog.LOG_ERROR,"timer error:" .. err)
-				else
-					if ret == nil then
-						self:Register(t.callback,t.ms,table.unpack(t.arg))
+		while not self.stop do
+			local timeouts = timer:Pop(C.GetSysTick())
+			if not timeouts then
+				break
+			end
+			for k,v in pairs(timeouts) do
+				if not v.invaild then
+					local status,ret = pcall(v.callback,table.unpack(v.arg))
+					if not status then
+						local err = ret
+						CLog.SysLog(CLog.LOG_ERROR,"timer error:" .. err)
+					else
+						if ret == nil then
+							self:Register(v.callback,v.ms,table.unpack(v.arg))
+						end
 					end
 				end
 			end
 		end
-		if self.stop  then 
+		if self.stop  then
 			return nil
 		end
 		Sche.Sleep(self.tickinterval)

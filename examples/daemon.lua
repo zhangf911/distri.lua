@@ -79,9 +79,9 @@ local function RunDaemonServer()
 
 	local function StartProcess(serv)
 		if serv[2] == "ssdb-server" then
-			C.ForkExec("../ssdb-master/ssdb-server","../ssdb-server/ssdb.conf",serv[1])
+			C.ForkExec("~/ssdb-master/ssdb-server","~/ssdb-server/ssdb.conf",serv[1])
 		else
-			local luafile = string.format("SurviveServer/%s/%s.lua",serv[2],serv[2])
+			local luafile = string.format("Survive/%s/%s.lua",serv[2],serv[2])
 			C.ForkExec("./distrilua",luafile,serv[1],serv[3])
 		end		
 	end
@@ -107,7 +107,7 @@ local function RunDaemonServer()
 					local r = FindByLogicname(opreq.logicname,opreq.group)
 					if r then
 						StartProcess(r)
-						retpk = CPacket.NewRawPacket("operation success")
+						retpk = Socket.RawPacket("operation success")
 					end
 				else
 					if opreq.group then
@@ -126,7 +126,7 @@ local function RunDaemonServer()
 					else
 						break
 					end
-					retpk = CPacket.NewRawPacket("operation success")
+					retpk = Socket.RawPacket("operation success")
 				end
 				break
 			elseif opreq.op == "Stop" or opreq.op == "Kill" then
@@ -174,20 +174,20 @@ local function RunDaemonServer()
 						break
 					end
 				end
-				retpk = CPacket.NewRawPacket("operation success")
+				retpk = Socket.RawPacket("operation success")
 				break
 			else
 				break
 			end
 		end
 		if not retpk then
-			retpk = CPacket.NewRawPacket("invaild operation")
+			retpk = Socket.RawPacket("invaild operation")
 		end
 		sock:Send(retpk)
 		sock:Close()
 	end
 
-	local server = Socket.New(CSocket.AF_INET,CSocket.SOCK_STREAM,CSocket.IPPROTO_TCP)
+	local server = Socket.Stream.New(CSocket.AF_INET)
 	if not server:Listen("127.0.0.1",8800) then
 			print("DaemonServer listen on 127.0.0.1 8800")
 			while true do
@@ -230,7 +230,7 @@ if not err then
 	end
 
 	Sche.Spawn(RunDaemonServer)
-	toredis:Command("set deployment " .. Cjson.encode(deployment))
+	toredis:CommandAsync("set deployment " .. Cjson.encode(deployment))
 	C.AddTopFilter("distrilua")
 	C.AddTopFilter("ssdb-server")
 	while true do
@@ -261,7 +261,7 @@ if not err then
 			i = i + 1	
 		end
 		local str = string.format("hmset MachineStatus 192.168.0.87 %s",CBase64.encode(Cjson.encode({machine,process})))
-		toredis:Command(str)
+		toredis:CommandAsync(str)
 		collectgarbage("collect")			
 		Sche.Sleep(1000)
 	end

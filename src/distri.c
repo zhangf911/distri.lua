@@ -1,16 +1,23 @@
 #include "kendynet.h"
-#include "lua_util.h"
+#include "lua/lua_util.h"
 #include "luasocket.h"
-#include "luaredis.h"
 #include "lualog.h"
 #include "kn_timer.h"
 #include "kn_time.h"
+#ifdef _LINUX
 #include "debug.h"
-#include "myprocps/mytop.h"
+//#include "myprocps/mytop.h"
+#endif
 #include "kn_daemonize.h"
+#include "wpacket.h"
+#include "rpacket.h"
+#include "rawpacket.h"
+#include "kn_objpool.h"
+#include "listener.h"
+#include "top.h"
 
-
-engine_t      g_engine = NULL;
+engine_t       g_engine = NULL;
+struct top    *g_top = NULL;
 volatile int  g_status = 1;
 
 static void sig_int(int sig){
@@ -19,7 +26,7 @@ static void sig_int(int sig){
 }
 
 static int  lua_getsystick(lua_State *L){
-	lua_pushnumber(L,kn_systemms());
+	lua_pushinteger(L,kn_systemms64());
 	return 1;
 }
 
@@ -48,6 +55,7 @@ static void start(lua_State *L,int argc,char **argv)
 	}
 	set_luaarg(L,argc,argv);
 	const char *error = LuaCall(L,"distri_lua_start_run","s",start_file);
+	listener_stop();	
 	if(error){
 		SYS_LOG(LOG_ERROR,"distri_lua_start_run: %s\n",error);
 		exit(0);
@@ -156,7 +164,8 @@ static int lua_RunOnce(lua_State *L){
 		return luaL_error(L,"need a integer param");		
 	if(g_status){ 
 		uint32_t ms = (uint32_t)lua_tointeger(L,1);
-		kn_engine_runonce(g_engine,ms);
+		uint32_t max_process_time = (uint32_t)lua_tointeger(L,2);
+		kn_engine_runonce(g_engine,ms,max_process_time);
 	}
 	lua_pushboolean(L,g_status);
 	return 1;
@@ -167,11 +176,18 @@ static int lua_Break(lua_State *L){
 }
 
 static int lua_Top(lua_State *L){
-	lua_pushstring(L,top());
-	return 1;
+	if(!g_top) g_top = new_top();
+	kn_string_t str = get_top(g_top);
+	if(str){
+		lua_pushstring(L,kn_to_cstr(str));
+		kn_release_string(str);
+		return 1;
+	}
+	return 0;
 }
 
 static int lua_AddTopFilter(lua_State *L){
+	if(!g_top) g_top = new_top();
 	if(lua_gettop(L) < 1)
 		return luaL_error(L,"need a least one param");		
 	int i;
@@ -179,14 +195,21 @@ static int lua_AddTopFilter(lua_State *L){
 	for(i = 1; i <= size; ++i){
 		if(!lua_isstring(L,i)) 
 			return luaL_error(L,"param should be string");
-		addfilter(lua_tostring(L,i));
-	}
+		add_filter(g_top,lua_tostring(L,i));
+	}		
 	return 0;
 }
 
+static int lua_GetPid(lua_State *L){
+	lua_pushinteger(L,getpid());
+	return 1;
+}
+
 void reg_luahttp(lua_State *L);
- void reg_luabase64(lua_State *L);
- void reg_timeutil(lua_State *L);
+void reg_luabase64(lua_State *L);
+void reg_timeutil(lua_State *L);
+void reg_luaredis(lua_State *L);
+void reg_luaminheap(lua_State *L);
 int main(int argc,char **argv)
 {
 	if(argc < 2){
@@ -200,6 +223,9 @@ int main(int argc,char **argv)
 			break;
 		}
 	}
+	g_wpk_allocator = objpool_new(sizeof(struct wpacket),100000);
+	g_rpk_allocator = objpool_new(sizeof(struct rpacket),100000);
+	g_rawpk_allocator = objpool_new(sizeof(struct rawpacket),100000);
 	/*if(debug_init()){
 		printf("debug_init failed\n");
 		return 0;
@@ -216,18 +242,20 @@ int main(int argc,char **argv)
         		{"AddTopFilter",lua_AddTopFilter},
         		{"ForkExec",lua_ForkExec},
         		{"KillProcess",lua_KillProcess},
-        		{"StopProcess",lua_StopProcess},          		              		                   
+        		{"StopProcess",lua_StopProcess}, 
+        		{"GetPid",lua_GetPid},         		              		                   
         		{NULL, NULL}
     	};
     	luaL_newlib(L, l);
-	lua_setglobal(L,"C");    		
+	lua_setglobal(L,"C");
+	g_engine = kn_new_engine();	    		
 	reg_luasocket(L);
 	reg_luahttp(L);
 	reg_luaredis(L);
 	reg_lualog(L);
 	reg_luabase64(L);
 	reg_timeutil(L);
-	g_engine = kn_new_engine();
+	reg_luaminheap(L);
 	start(L,argc,argv);
 	return 0;
 } 

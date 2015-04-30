@@ -69,15 +69,15 @@ function distri_lua_start_run(mainfile)
 	 end
 	Sche.Spawn(function () main() end)
 	Sche.Spawn(process_c_callback)--启动一个协程去处理回调
-	local ms = 5
-	while C.RunOnce(ms) do
+	local ms = 1
+	while C.RunOnce(ms,50) do
 		local ret = Sche.Schedule()
 		if ret < 0 then
 			return
 		elseif ret > 0 then
 			ms = 0
 		else
-			ms = 5
+			ms = 1
 		end
 	end
 end

@@ -28,10 +28,15 @@ function http_response:Send(connection)
 	connection:Send(CPacket.NewRawPacket(s))	
 end
 
-function http_response:WriteHead(status,phase,...)
+function http_response:WriteHead(status,phase,contents)
 	self.status = status
 	self.phase = phase
-	self.headers = table.pack(...)
+	self.headers = self.headers or {}
+	if contents then
+		for k,v in pairs(contents) do
+			table.insert(self.headers,v)
+		end
+	end
 end
 
 function http_response:End(body)
@@ -93,7 +98,7 @@ function http_server:CreateServer(on_request)
 end
 
 function http_server:Listen(ip,port)
-	self.socket = Socket.New(CSocket.AF_INET,CSocket.SOCK_STREAM,CSocket.IPPROTO_TCP)
+	self.socket = Socket.Stream.New(CSocket.AF_INET)
 	local err = self.socket:Listen(ip,port)
 	if err then
 		return err

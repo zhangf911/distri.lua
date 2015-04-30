@@ -1,10 +1,9 @@
-local MinHeap = require "lua.minheap"
 local LinkQue =  require "lua.linkque"
 
 
 local sche = {
 	ready_list = LinkQue.New(),
-	timer = MinHeap.New(),
+	timer = CMinHeap.New(),
 	allcos = {},
 	co_count = 0,
 	runningco = nil,
@@ -22,27 +21,40 @@ local function add2Ready(co)
     if status == stat_ready or status == stat_dead or status == stat_running then
     	return
     end
-    co.status = stat_ready    
+    co.status = stat_ready
+    sche.timer:Remove(co)    
     sche.ready_list:Push(co) 
 end
 
-local function Sleep(ms)
+local function _block(ms,stat)
 	local co = sche.runningco
 	if co.status ~= stat_running then
 		return
-	end	
-	if ms and ms > 0 then
-		co.timeout = C.GetSysTick() + ms
-        		if co.index == 0 then
-            			sche.timer:Insert(co)
-        		else
-            			sche.timer:Change(co)
-        		end
-        		co.status = stat_sleep		
-	else
-		co.status = stat_yield
 	end
+    	if ms and ms > 0 then
+        		local timeout = C.GetSysTick() + ms
+        		if co.heapele then
+             			sche.timer:Change(co,timeout)       			
+        		else
+            			sche.timer:Insert(co,timeout)        			
+        		end
+    	end
+	co.status = stat
 	coroutine.yield(co.coroutine)
+	if co.heapele then		
+	        sche.timer:Remove(co)
+	        return "timeout"
+	end
+end
+
+local function Sleep(ms)
+	local stat
+	if ms and ms > 0 then
+		stat = stat_sleep
+	else
+		stat = stat_yield
+	end
+	return _block(ms,stat)
 end
 
 local function Yield()
@@ -50,27 +62,7 @@ local function Yield()
 end
 
 local function Block(ms)
-	local co = sche.runningco
-	if co.status ~= stat_running then
-		return
-	end
-    	if ms and ms > 0 then
-		ms = ms * 1000
-       		local nowtick = C.GetSysTick()
-        		co.timeout = nowtick + ms
-        		if co.index == 0 then
-            			sche.timer:Insert(co)
-        		else
-            			sche.timer:Change(co)
-        		end
-    	end
-	co.status = stat_block
-	coroutine.yield(co.coroutine)
-	if co.index ~= 0 then
-	        co.timeout = 0		
-	        sche.timer:Change(co)
-	        sche.timer:PopMin()
-	end
+	return _block(ms,stat_block)
 end
 
 local function WakeUp(co)
@@ -94,6 +86,7 @@ local function Schedule(co)
 		if status == stat_ready or status == stat_dead or status == stat_running then
 			return sche.ready_list:Len()
 		end
+		sche.timer:Remove(co)
 		if SwitchTo(co) == stat_yield then
 			add2Ready(co)
 		end
@@ -112,14 +105,12 @@ local function Schedule(co)
 			end			
 			co = readylist:Pop()
 		end
-		local now = C.GetSysTick()
-		local timer = sche.timer
-		while timer:Min() ~=0 and timer:Min() <= now do
-			co = timer:PopMin()
-			if co.status == stat_block or co.status == stat_sleep then
-				add2Ready(co)
+		local timeouts = sche.timer:Pop(C.GetSysTick())
+		if timeouts then
+			for k,v in pairs(timeouts) do
+				add2Ready(v)
 			end
-		end
+		end		
 		for k,v in pairs(yields) do
 			add2Ready(v)
 		end
@@ -147,8 +138,8 @@ end
 
 local g_counter = 0
 local function gen_identity()
-	g_counter = g_counter + 1
-	return string.format("%d%d",C.GetSysTick(),g_counter)
+	g_counter = bit32.band(g_counter + 1,0x000FFFFF)
+	return string.format("%d-%d",C.GetSysTick(),g_counter)
 end
 
 --产生一个coroutine在下次调用Schedule时执行

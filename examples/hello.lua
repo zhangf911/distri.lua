@@ -3,6 +3,7 @@ local sche = require "lua.sche"
 local TcpServer = require "lua.tcpserver"
 local App = require "lua.application"
 local Timer = require "lua.timer"
+local Socket = require "lua.socket"
 
 
 local count = 0
@@ -18,7 +19,7 @@ local success
 
 --pingpong:Run(function ()
 local success = not TcpServer.Listen("127.0.0.1",8000,function (client)
-		client:Establish(CSocket.rpkdecoder(65535))
+		client:Establish(Socket.Stream.RDecoder(65535))
 		pingpong:Add(client,on_packet,function () print("disconnected") end,5000)		
 	end)
 --end)
@@ -29,7 +30,7 @@ if success then
 	local timer = Timer.New():Register(function ()
 		local now = C.GetSysTick()
 		--print("count:" .. count*1000/(now-last) .. " " .. now-last)
-		print(string.format("count:%d,size:%d MB",count*1000/(now-last),size*1000/(now-last)/1024/1024))
+		print(string.format("count:%d,size:%f MB",count*1000/(now-last),size*1000/(now-last)/1024/1024))
 		count = 0
 		size = 0
 		last = now

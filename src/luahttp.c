@@ -1,8 +1,8 @@
-#include "stream_conn.h"
+#include "connection.h"
 #include "luapacket.h"
 #include "luasocket.h"
 #include "http-parser/http_parser.h"
-#include "lua_util.h"
+#include "lua/lua_util.h"
 
 enum{ 
 	  ON_MESSAGE_BEGIN = 0,
@@ -29,7 +29,7 @@ const char *event_type[] = {
 struct luahttp_parser{
 	http_parser base;
 	http_parser_settings settings;	
-	stream_conn_t c;
+	connection_t c;
 	uint32_t maxsize;
 	buffer_t buf;
 	int parser_type;	
@@ -91,8 +91,8 @@ static void create_httpevent(lua_State *L,struct luahttp_parser *parser,const ch
 		ev->len = len;
 }
 
-int  on_http_cb(stream_conn_t c,packet_t p){
-	luasocket_t luasock = (luasocket_t)stream_conn_getud(c);
+void  on_http_cb(connection_t c,packet_t p){
+	luasocket_t luasock = (luasocket_t)connection_getud(c);
 	luaRef_t  *obj = &luasock->luaObj;	
 	int __result;
 	lua_State *__L = obj->L;
@@ -111,7 +111,7 @@ int  on_http_cb(stream_conn_t c,packet_t p){
 		}	
 	}
 	lua_settop(__L,__oldtop);	
-	return 0;	
+	//return 0;	
 }
 
 static inline int _http_data_cb(http_parser *_parser, const char *at, size_t length,int evtype){
@@ -173,8 +173,9 @@ static int on_message_complete(http_parser *_parser){
 	return ret;			
 }
 
-static int unpack(decoder *d,stream_conn_t c){
+static int unpack(decoder *d,void *_){
 	uint32_t pk_len = 0;
+	connection_t c = (connection_t)_;
 	struct httpdecoder *httpd = (struct httpdecoder*)d;
 	if(!httpd->parser.c) httpd->parser.c = c;
 	do{ 
@@ -198,7 +199,7 @@ static int unpack(decoder *d,stream_conn_t c){
 			c->unpack_pos = 0;
 			c->unpack_buf = buffer_acquire(c->unpack_buf,c->unpack_buf->next);
 		}
-		if(c->is_close) return decode_socket_close;
+		if(connection_isclose(c)) return decode_socket_close;
 	}while(1);
 	return 0;
 }
